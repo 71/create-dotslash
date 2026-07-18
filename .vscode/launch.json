@@ -1,0 +1,44 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=create-dotslash",
+          "--package=create-dotslash"
+        ],
+        "filter": {
+          "name": "create-dotslash",
+          "kind": "bin"
+        }
+      },
+      "args": [
+        "https://github.com/protocolbuffers/protobuf/releases/tag/v29.0-rc2"
+      ],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--bin=create-dotslash",
+          "--package=create-dotslash"
+        ],
+        "filter": {
+          "name": "create-dotslash",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

@@ -1,0 +1,209 @@
+name: Continuous integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
+
+      - name: Check format
+        run: cargo fmt --check
+
+      - name: Check lints
+        run: cargo clippy --no-deps
+
+      - name: Run tests
+        run: cargo test --workspace
+
+      - name: Get release version
+        id: version
+        run: |
+          version=v$(sed -En 's/^version = \"([0-9.]+)\"/\1/p' Cargo.toml)
+          create_release=$(git ls-remote --exit-code --tags origin $version && echo false || echo true)
+
+          echo version=$version >> "$GITHUB_OUTPUT"
+          echo create-release=$create_release >> "$GITHUB_OUTPUT"
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      create-release: ${{ steps.version.outputs.create-release }}
+
+  release-linux:
+    # Build for Linux first (before `release` below) since it needs a different setup for
+    # cross-compilation, and that way we can check that the `--release` build is valid before
+    # starting up the CI for other platforms. This also allows us to simplify how the release is
+    # created: we create it at the end of this step, edit it in `release`, then complete it in
+    # `release-complete`.
+    name: Release - unknown-linux-musl
+    needs: check
+    if: github.event_name == 'push' && needs.check.outputs.create-release == 'true'
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
+
+      - name: Setup Environment
+        run: |
+          # Use `zig` for cross-compilation (aarch64) and `musl` support (aarch64, x86_64).
+          echo PATH="$PATH:$PWD/tools" >> "$GITHUB_ENV"  # For `dotslash`, `cargo-zigbuild`, `zig`.
+
+      - name: Build for x86_64
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          cargo zigbuild --locked --release --target x86_64-unknown-linux-musl
+
+      - name: Build for aarch64
+        run: |
+          rustup target add aarch64-unknown-linux-musl
+          cargo zigbuild --locked --release --target aarch64-unknown-linux-musl
+
+      - name: Create release
+        id: create-release
+        run: |
+          for arch in aarch64 x86_64; do
+            mv target/$arch-unknown-linux-musl/release/create-dotslash \
+               create-dotslash-$arch-unknown-linux-musl
+          done
+
+          draft_url="$(gh release create "${{ needs.check.outputs.version }}" \
+            --draft \
+            --notes "create-dotslash ${{ needs.check.outputs.version }}" \
+            create-dotslash-* \
+            tools/dotslash)"
+
+          echo draft-tag="$(echo "$draft_url" | cut -d/ -f8)" >> "$GITHUB_OUTPUT"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    outputs:
+      draft-tag: ${{ steps.create-release.outputs.draft-tag }}
+
+  release:
+    strategy:
+      matrix:
+        platform:
+          - runs-on: macos-latest
+            target-suffix: apple-darwin
+
+          - runs-on: windows-latest
+            target-suffix: pc-windows-msvc
+
+    name: Release - ${{ matrix.platform.target-suffix }}
+    needs: [check, release-linux]
+    runs-on: ${{ matrix.platform.runs-on }}
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
+
+      - name: Build for x86_64
+        run: |
+          rustup target add x86_64-${{ matrix.platform.target-suffix }}
+          cargo build --locked --release --target x86_64-${{ matrix.platform.target-suffix }}
+
+      - name: Build for aarch64
+        run: |
+          rustup target add aarch64-${{ matrix.platform.target-suffix }}
+          cargo build --locked --release --target aarch64-${{ matrix.platform.target-suffix }}
+
+      - name: Upload to release
+        if: matrix.platform.target-suffix != 'pc-windows-msvc'
+        run: |
+          for arch in aarch64 x86_64; do
+            mv target/$arch-${{ matrix.platform.target-suffix }}/release/create-dotslash \
+               create-dotslash-$arch-${{ matrix.platform.target-suffix }}
+          done
+
+          gh release upload "${{ needs.check.outputs.version }}" create-dotslash-*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload to release (Windows)
+        if: matrix.platform.target-suffix == 'pc-windows-msvc'
+        run: |
+          foreach ($arch in "aarch64", "x86_64") {
+            mv "target/$arch-pc-windows-msvc/release/create-dotslash.exe" `
+               "create-dotslash-$arch-pc-windows-msvc.exe"
+          }
+
+          gh release upload "${{ needs.check.outputs.version }}" (ls create-dotslash-*)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-complete:
+    name: Release - complete
+    needs: [check, release-linux, release]
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Generate Dotslash file
+        run: |
+          gh release download "${{ needs.check.outputs.version }}" \
+            --pattern create-dotslash-x86_64-unknown-linux-musl
+          chmod +x create-dotslash-x86_64-unknown-linux-musl
+
+          # We created a draft, so we can't access it via its tag. Instead, we must use the tag we
+          # got when we created the release.
+          ./create-dotslash-x86_64-unknown-linux-musl \
+            "github:$GITHUB_REPOSITORY/${{ needs.release-linux.outputs.draft-tag }}" \
+            --output create-dotslash
+
+          # But from now on we want to access it via its tag, so we replace it in the generated
+          # file.
+          sed -i 's/${{ needs.release-linux.outputs.draft-tag }}/${{ needs.check.outputs.version }}/g' create-dotslash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+
+      - name: Finish release
+        run: |
+          gh release upload "${{ needs.check.outputs.version }}" create-dotslash
+          gh release edit "${{ needs.check.outputs.version }}" --draft=false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+
+  release-failure:
+    name: Release - cleanup
+    needs: [check, release-complete]
+    if: failure()
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Delete release
+        run: |
+          gh release delete "${{ needs.check.outputs.version }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}

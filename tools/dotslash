@@ -1,0 +1,69 @@
+#!/bin/sh
+set -eu
+
+cache_dir="${XDG_CACHE_HOME:-${HOME:-}/.cache/create-dotslash}"
+test "$cache_dir" != "/.cache" || (echo '$XDG_CACHE_HOME or $HOME must be set' >&2 && exit 1)
+
+arch="$(uname -m)"
+case "$arch" in
+	arm64) arch=aarch64 ;;
+	*) ;;
+esac
+
+os="$(uname)"
+case "$os" in
+	Linux|Cygwin) os=linux ;;
+	Darwin) os=macos ;;
+	*) os="$(echo "$os" | tr '[:upper:]' '[:lower:]')";;
+esac
+
+case "$os-$arch" in
+	linux-aarch64)
+		digest=e58374446dacd4a228388cd275d974bbd8f946916b513cf0eb86bdff5d9d675e
+		size=754251
+		url="https://github.com/facebook/dotslash/releases/download/v0.5.9/dotslash-linux-musl.arm64.v0.5.9.tar.gz"
+		;;
+	linux-x86_64)
+		digest=4c75c6eb7890ae35993b962073f6d9bbe78b42b81a5691303ad70f63bfbf7196
+		size=842816
+		url="https://github.com/facebook/dotslash/releases/download/v0.5.9/dotslash-linux-musl.x86_64.v0.5.9.tar.gz"
+		;;
+	macos-aarch64)
+		digest=32c38c615d55c1a4e806c0c22296b3de9dad5fcffb6659fe8b36451cd085f8cc
+		size=599325
+		url="https://github.com/facebook/dotslash/releases/download/v0.5.9/dotslash-macos-arm64.tar.gz"
+		;;
+	macos-x86_64)
+		digest=51446593596ffe4cd22bc43a0fe6d82dd367758eb53cb4ade36d6a684ed08469
+		size=716580
+		url="https://github.com/facebook/dotslash/releases/download/v0.5.9/dotslash-macos-amd64.v0.5.9.tar.gz"
+		;;
+	*)
+		echo "unknown platform $platform; supported: linux-aarch64, linux-x86_64, macos-aarch64, macos-x86_64" >&2
+		exit 1
+		;;
+esac
+
+dir="$cache_dir/dotslash-1757f0ede8431fdd81be6d400d09eb42543cc096d80d91900b8419e0ebf11d6f"
+bin="$dir/dotslash"
+
+test -x "$bin" && exec "$bin" "$@"
+
+mkdir -p "$dir"
+(flock 9; if ! test -x "$bin"; then
+	rm "$dir/.lock"
+	tmp="$dir/.tmp"
+	checksum="$(curl -fsSL "$url" | tee "$tmp" | sha256sum -b)"
+	checksum="${checksum%% *}"
+
+	test "$checksum" != "$digest" \
+		&& echo "invalid sha256sum checksum; expected $digest, but got $checksum" >&2 \
+		&& rm -rf "$dir" \
+		&& exit 2
+
+	tar -xzf "$tmp" -C "$dir"
+	chmod +x "$bin"
+	rm -f "$tmp"
+fi) 9>"$dir/.lock"
+
+exec "$bin" "$@"

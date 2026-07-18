@@ -1,0 +1,30 @@
+#!/usr/bin/env dotslash
+{
+  "name": "zig",
+  "platforms": {
+    "linux-aarch64": {
+      "size": 52587720,
+      "hash": "blake3",
+      "digest": "877c2fdd9f4a5734e76ec7b7129d72da03282eee659bb00318f9f43a712e3a75",
+      "format": "tar.xz",
+      "path": "zig-aarch64-linux-0.17.0-dev.1422+e863bf3be/zig",
+      "providers": [
+        {
+          "url": "https://ziglang.org/builds/zig-aarch64-linux-0.17.0-dev.1422+e863bf3be.tar.xz"
+        }
+      ]
+    },
+    "linux-x86_64": {
+      "size": 56967764,
+      "hash": "blake3",
+      "digest": "f491bbc8b5f06c5e2693d13472eead41fd109068f94132e62595a554c9d60bd8",
+      "format": "tar.xz",
+      "path": "zig-x86_64-linux-0.17.0-dev.1422+e863bf3be/zig",
+      "providers": [
+        {
+          "url": "https://ziglang.org/builds/zig-x86_64-linux-0.17.0-dev.1422+e863bf3be.tar.xz"
+        }
+      ]
+    }
+  }
+}
