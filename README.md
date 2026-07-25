@@ -50,33 +50,47 @@ Arguments:
           
           The following formats are supported:
           
-          - `https://some.url/path/to/file`: download the file at the given URL, using its extension to determine its type.
+          - `https://some.url/path/to/file`: download the file at the given URL,
+          using its extension to determine its type.
           
-          - `https://github.com/org/repo/releases/release`: download the given `release` from `org/repo`. Also available as `github:org/repo/release` (or `github:example.com/org/repo/release` for GHE).
+          - `https://github.com/org/repo/releases/release`: download the given
+          `release` from `org/repo`. Also available as `github:org/repo/release`
+          (or `github:example.com/org/repo/release` for GHE).
           
-          - `https://github.com/org/repo`: download the latest stable `release` from `org/repo`. Also available as `github:org/repo` (or `github:example.com/org/repo` for GHE).
+          - `https://github.com/org/repo`: download the latest stable `release`
+          from `org/repo`. Also available as `github:org/repo` (or
+          `github:example.com/org/repo` for GHE).
           
-          Options can be specified after each URI using a hash `#`, and separated by a comma:
+          Options can be specified after each URI using a hash `#`, and
+          separated by a comma:
           
           - `path=<path>`: the path of the binary in its archive.
           
           HTTP releases additional support the following options:
           
-          - `digest=<digest>`: the digest of the archive or binary; specifying both a `path` and a `digest` allows the download of the archive to be skipped.
+          - `digest=<digest>`: the digest of the archive or binary; specifying
+          both a `path` and a `digest` allows the download of the archive to be
+          skipped.
           
-          - `sha256=<hash>`: same as `digest`, but with an implicit `sha256:` prefix.
+          - `sha256=<hash>`: same as `digest`, but with an implicit `sha256:`
+          prefix.
           
-          - `blake3=<hash>`: same as `digest`, but with an implicit `blake3:` prefix.
+          - `blake3=<hash>`: same as `digest`, but with an implicit `blake3:`
+          prefix.
           
           GitHub releases additionally support the following options:
           
-          - `platform=<platform>`: only download artifacts for the given platforms (architecture, OS, or both separated by a hyphen `-`). Can be repeated.
+          - `platform=<platform>`: only download artifacts for the given
+          platforms (architecture, OS, or both separated by a hyphen `-`). Can
+          be repeated.
           
           - `gnu`: prefer `gnu` over `musl` when both are available.
           
           - `musl`: prefer `musl` over `gnu` when both are available (default).
           
-          As a special case, a file may also end with `.sha256`. The same file without the `.sha256` prefix will be downloaded instead and checked against the fetched `.sha256`.
+          As a special case, a file may also end with `.sha256`. The same file
+          without the `.sha256` prefix will be downloaded instead and checked
+          against the fetched `.sha256`.
 
 Options:
   -o, --output <FILE>
@@ -90,7 +104,10 @@ Options:
 
           Possible values:
           - dotslash: Dotslash file
-          - sh:       Self-contained shell script; requires `/bin/sh`, `curl`, `tee`, `mkdir`, `chmod`, `flock`, and additional programs for computing digests (`b3sum` or `sha256sum`) and for extraction (or `mv` if no extraction is needed)
+          - sh:       Self-contained shell script; requires `/bin/sh`, `curl`,
+            `tee`, `mkdir`, `chmod`, `flock`, and additional programs for
+            computing digests (`b3sum` or `sha256sum`) and for extraction (or
+            `mv` if no extraction is needed)
           
           [default: dotslash]
 
@@ -98,7 +115,8 @@ Options:
           The name to give to the program
 
       --no-interactive
-          Fail instead of prompting when some information is missing; implicitly true if no terminal is connected
+          Fail instead of prompting when some information is missing; implicitly
+          true if no terminal is connected
 
       --no-progress
           Do not display progress; implicitly true if no terminal is connected

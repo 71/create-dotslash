@@ -403,6 +403,7 @@ fn readme_up_to_date() {
         [readme.find(help_start).unwrap() + help_start.len()..readme.rfind(help_end).unwrap()];
 
     let expected_help = <Args as clap::CommandFactory>::command()
+        .term_width(80)
         .render_long_help()
         .to_string();
 
@@ -427,7 +428,6 @@ fn readme_up_to_date() {
         .unwrap();
 
     std::fs::remove_file(actual_help_path).unwrap();
-    std::fs::remove_file(expected_help_path).unwrap();
 
-    panic!("README.md has outdated usage string; use `cargo run -- --help` to get its newer value");
+    panic!("README.md has outdated usage string; copy {expected_help_path} to README.md");
 }
