@@ -392,3 +392,42 @@ async fn expand_http(
         size,
     })
 }
+
+#[test]
+fn readme_up_to_date() {
+    let readme =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md")).unwrap();
+    let help_start = "\n$ create-dotslash --help\n";
+    let help_end = "```";
+    let actual_help = &readme
+        [readme.find(help_start).unwrap() + help_start.len()..readme.rfind(help_end).unwrap()];
+
+    let expected_help = <Args as clap::CommandFactory>::command()
+        .render_long_help()
+        .to_string();
+
+    if actual_help == expected_help {
+        return;
+    }
+
+    let actual_help_path = concat!(env!("CARGO_MANIFEST_DIR"), "/target/actual_help.txt");
+    let expected_help_path = concat!(env!("CARGO_MANIFEST_DIR"), "/target/expected_help.txt");
+
+    std::fs::write(actual_help_path, actual_help).unwrap();
+    std::fs::write(expected_help_path, expected_help).unwrap();
+
+    std::process::Command::new("git")
+        .arg("diff")
+        .arg("--no-index")
+        .arg(actual_help_path)
+        .arg(expected_help_path)
+        .spawn()
+        .unwrap()
+        .wait()
+        .unwrap();
+
+    std::fs::remove_file(actual_help_path).unwrap();
+    std::fs::remove_file(expected_help_path).unwrap();
+
+    panic!("README.md has outdated usage string; use `cargo run -- --help` to get its newer value");
+}
