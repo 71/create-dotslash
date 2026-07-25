@@ -40,12 +40,12 @@ struct Args {
     #[arg(long, value_name = "NAME", value_hint = clap::ValueHint::Other)]
     name: Option<String>,
 
-    /// Fail instead of prompting when some information is missing. Implicitly true if no terminal
+    /// Fail instead of prompting when some information is missing; implicitly true if no terminal
     /// is connected.
     #[arg(long)]
     no_interactive: bool,
 
-    /// Do not display progress. Implicitly true if no terminal is connected.
+    /// Do not display progress; implicitly true if no terminal is connected.
     #[arg(long)]
     no_progress: bool,
 

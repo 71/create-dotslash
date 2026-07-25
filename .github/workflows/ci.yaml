@@ -176,6 +176,9 @@ jobs:
             "github:$GITHUB_REPOSITORY/${{ needs.release-linux.outputs.draft-tag }}" \
             --output create-dotslash
 
+          # Make sure that it works.
+          ./create-dotslash --help
+
           # But from now on we want to access it via its tag, so we replace it in the generated
           # file.
           sed -i 's/${{ needs.release-linux.outputs.draft-tag }}/${{ needs.check.outputs.version }}/g' create-dotslash
