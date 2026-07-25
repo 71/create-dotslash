@@ -30,7 +30,7 @@ pub async fn fetch(
     path: Option<String>,
     file_format: Option<ArchiveFormat>,
     prefer_sha256: bool,
-    progress: Option<&cliclack::MultiProgress>,
+    progress: Option<&indicatif::MultiProgress>,
     picked_path_if_interactive: Option<&RefCell<Option<String>>>,
 ) -> Result<FetchedArtifact, snafu::WhateverLocal> {
     // Send request.
@@ -60,25 +60,33 @@ pub async fn fetch(
     let mut size = 0;
 
     let progress_bar = progress.map(|p| {
-        p.add({
-            let bar = if let Some(len) = response.content_length() {
-                cliclack::ProgressBar::new(len).with_download_template()
-            } else {
-                cliclack::ProgressBar::new(1).with_spinner_template()
-            };
+        let bar = p.add(indicatif::ProgressBar::new(
+            response.content_length().unwrap_or(1),
+        ));
 
-            let name = if let Some(mut segments) = url.path_segments()
-                && let Some(segment) = segments.next_back()
-                && !segment.is_empty()
-            {
-                segment
-            } else {
-                url.path()
-            };
+        if response.content_length().is_some() {
+            bar.set_style(
+                indicatif::ProgressStyle::with_template(
+                    "[{elapsed}] {bar:40.cyan/blue} {bytes:>7}/{total_bytes:7} {msg}",
+                )
+                .unwrap()
+                .progress_chars("##-"),
+            );
+        } else {
+            bar.set_style(indicatif::ProgressStyle::default_spinner());
+        }
 
-            bar.start(name);
-            bar
-        })
+        let name = if let Some(mut segments) = url.path_segments()
+            && let Some(segment) = segments.next_back()
+            && !segment.is_empty()
+        {
+            segment
+        } else {
+            url.path()
+        };
+
+        bar.set_message(name.to_owned());
+        bar
     });
 
     while let Some(chunk) = response
@@ -108,17 +116,19 @@ pub async fn fetch(
     }
 
     let path = if let Some(archive) = archive {
-        pick_path(
-            &url,
-            archive.finish(&url).await?,
-            picked_path_if_interactive,
-        )?
+        let entries = archive.finish(&url).await?;
+
+        if let Some(progress) = progress {
+            progress.suspend(|| pick_path(&url, entries, picked_path_if_interactive))
+        } else {
+            pick_path(&url, entries, picked_path_if_interactive)
+        }?
     } else {
         path.unwrap_or(name)
     };
 
     if let Some(progress_bar) = progress_bar {
-        progress_bar.clear();
+        progress_bar.finish();
     }
 
     Ok(FetchedArtifact {
@@ -184,13 +194,10 @@ fn pick_path(
         index
     } else {
         // Prompt the user for the right path.
-        let path_index = display_paths
-            .clone()
-            .enumerate()
-            .fold(
-                cliclack::select(format!("Binary in {url}:")),
-                |select, (i, path)| select.item(i, path, ""),
-            )
+        let path_index = dialoguer::Select::new()
+            .with_prompt(format!("Binary in {url}"))
+            .items(display_paths.clone())
+            .default(0)
             .interact()
             .with_whatever_context(|_| format!("failed to prompt binary for {url}"))?;
 

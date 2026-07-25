@@ -166,7 +166,8 @@ async fn run(args: Args) -> Result<(), snafu::WhateverLocal> {
         let overwrite = args.force
             || (interactive
                 && out.exists()
-                && cliclack::Confirm::new(format!("Overwrite {}?", out.display()))
+                && dialoguer::Confirm::new()
+                    .with_prompt(format!("Overwrite {}?", out.display()))
                     .interact()
                     .unwrap_or(false));
 

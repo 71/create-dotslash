@@ -96,7 +96,7 @@ async fn create_dotslash_file(
     let picked_path = interactive.then(|| RefCell::new(None));
     let picked_path = picked_path.as_ref();
 
-    let progress = progress.then(|| cliclack::MultiProgress::new("Downloading artifacts..."));
+    let progress = progress.then(indicatif::MultiProgress::new);
     let progress = progress.as_ref();
 
     let mut tasks = futures_util::stream::FuturesUnordered::new();
@@ -185,11 +185,11 @@ async fn create_dotslash_file(
         });
     }
 
-    if let Some(progress) = progress {
-        progress.stop();
-    }
-
     entries.sort_by_key(|entry| entry.dotslash_platform);
+
+    if let Some(progress) = progress {
+        let _ = progress.clear();
+    }
 
     Ok(entries)
 }
