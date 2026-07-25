@@ -1,9 +1,12 @@
 use std::cell::RefCell;
 
+use futures_util::TryStreamExt;
 use snafu::ResultExt;
 
 use crate::{
+    Client,
     archive::{self, Archive},
+    chunks, content_length, send,
     target::{ArchiveFormat, Digest},
 };
 
@@ -24,8 +27,8 @@ pub struct FetchedArtifact {
 /// path instead of repeatedly prompting.
 #[expect(clippy::too_many_arguments)]
 pub async fn fetch(
-    client: &reqwest::Client,
-    url: reqwest::Url,
+    client: &Client,
+    url: &str,
     name: String,
     path: Option<String>,
     file_format: Option<ArchiveFormat>,
@@ -34,13 +37,7 @@ pub async fn fetch(
     picked_path_if_interactive: Option<&RefCell<Option<String>>>,
 ) -> Result<FetchedArtifact, snafu::WhateverLocal> {
     // Send request.
-    let mut response = client
-        .get(url.clone())
-        .send()
-        .await
-        .with_whatever_context(|_| format!("failed to GET {url}"))?
-        .error_for_status()
-        .with_whatever_context(|_| format!("failed to GET {url}"))?;
+    let response = send(client, url, Default::default()).await?;
 
     // Read response, computing the hash, size, and optionally collecting archive entries.
     let mut archive = if path.is_none()
@@ -60,11 +57,12 @@ pub async fn fetch(
     let mut size = 0;
 
     let progress_bar = progress.map(|p| {
+        let content_length = content_length(&response);
         let bar = p.add(indicatif::ProgressBar::new(
-            response.content_length().unwrap_or(1),
+            content_length.unwrap_or(1) as u64
         ));
 
-        if response.content_length().is_some() {
+        if content_length.is_some() {
             bar.set_style(
                 indicatif::ProgressStyle::with_template(
                     "[{elapsed}] {bar:40.cyan/blue} {bytes:>7}/{total_bytes:7} {msg}",
@@ -76,21 +74,22 @@ pub async fn fetch(
             bar.set_style(indicatif::ProgressStyle::default_spinner());
         }
 
-        let name = if let Some(mut segments) = url.path_segments()
-            && let Some(segment) = segments.next_back()
-            && !segment.is_empty()
+        let name = if let Some(index) = url.rfind('/')
+            && index < url.len() - 1
         {
-            segment
+            &url[index + 1..]
         } else {
-            url.path()
+            url
         };
 
         bar.set_message(name.to_owned());
         bar
     });
 
-    while let Some(chunk) = response
-        .chunk()
+    let mut stream = chunks(response.into_body());
+
+    while let Some(chunk) = stream
+        .try_next()
         .await
         .with_whatever_context(|_| format!("failed to read response from {url}"))?
     {
@@ -111,17 +110,17 @@ pub async fn fetch(
         }
 
         if let Some(archive) = &mut archive {
-            archive.update(chunk, &url).await?;
+            archive.update(chunk, url).await?;
         }
     }
 
     let path = if let Some(archive) = archive {
-        let entries = archive.finish(&url).await?;
+        let entries = archive.finish(url).await?;
 
         if let Some(progress) = progress {
-            progress.suspend(|| pick_path(&url, entries, picked_path_if_interactive))
+            progress.suspend(|| pick_path(url, entries, picked_path_if_interactive))
         } else {
-            pick_path(&url, entries, picked_path_if_interactive)
+            pick_path(url, entries, picked_path_if_interactive)
         }?
     } else {
         path.unwrap_or(name)
@@ -149,7 +148,7 @@ enum Hasher {
 
 /// Returns the path in `entries` to use as the binary path, possibly prompting the user for it.
 fn pick_path(
-    url: &reqwest::Url,
+    url: &str,
     mut entries: Vec<archive::Entry>,
     picked_path_if_interactive: Option<&RefCell<Option<String>>>,
 ) -> Result<String, snafu::WhateverLocal> {

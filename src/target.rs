@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use snafu::{OptionExt, ResultExt};
 
-use crate::github::with_gh_token;
+use crate::{Client, github::with_gh_token, read_all, send};
 
 /// A file to download specified by the user.
 #[derive(Clone)]
@@ -633,10 +633,7 @@ pub enum Digest {
 impl Digest {
     /// Loads a digest from `s`: if it is an `https:` URL, fetches it and parses it. Otherwise,
     /// expects a `sha256:` or `blake3:` scheme followed by either a hexadecimal or base64 hash.
-    pub async fn parse_or_fetch(
-        client: &reqwest::Client,
-        s: &str,
-    ) -> Result<Self, snafu::WhateverLocal> {
+    pub async fn parse_or_fetch(client: &Client, s: &str) -> Result<Self, snafu::WhateverLocal> {
         if s.starts_with("https:") {
             Self::fetch(client, s).await
         } else {
@@ -644,22 +641,13 @@ impl Digest {
         }
     }
 
-    pub async fn fetch(client: &reqwest::Client, url: &str) -> Result<Self, snafu::WhateverLocal> {
-        let parsed =
-            reqwest::Url::parse(url).with_whatever_context(|_| format!("invalid url: {url}"))?;
-
-        let response = with_gh_token(client.get(parsed))
-            .send()
-            .await
-            .with_whatever_context(|_| format!("failed to get {url}"))?
-            .error_for_status()
-            .with_whatever_context(|_| format!("failed to get {url}"))?;
+    pub async fn fetch(client: &Client, url: &str) -> Result<Self, snafu::WhateverLocal> {
+        let response = send(client, url, with_gh_token(Default::default())?).await?;
 
         // We trust the URL we fetch (after all, it's pretty important, it gives us a digest we use
         // to trust the binary we'll execute later), so we just download the whole thing without a
         // limit (which we can't easily do: https://github.com/seanmonstar/reqwest/issues/1234).
-        let response_bytes = response
-            .bytes()
+        let response_bytes = read_all(response)
             .await
             .with_whatever_context(|_| format!("failed to read {url}"))?;
 

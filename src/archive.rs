@@ -47,18 +47,14 @@ impl Archive {
         Archive { sender, task }
     }
 
-    pub async fn update(
-        &mut self,
-        bytes: Bytes,
-        url: &reqwest::Url,
-    ) -> Result<(), snafu::WhateverLocal> {
+    pub async fn update(&mut self, bytes: Bytes, url: &str) -> Result<(), snafu::WhateverLocal> {
         self.sender
             .send(bytes)
             .await
             .with_whatever_context(|_| format!("failed to scan archive from {url}"))
     }
 
-    pub async fn finish(self, url: &reqwest::Url) -> Result<Vec<Entry>, snafu::WhateverLocal> {
+    pub async fn finish(self, url: &str) -> Result<Vec<Entry>, snafu::WhateverLocal> {
         drop(self.sender);
 
         self.task

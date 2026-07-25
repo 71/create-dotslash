@@ -4,6 +4,7 @@ use futures_util::StreamExt;
 use snafu::ResultExt;
 
 use crate::{
+    Client,
     fetch::{self, fetch},
     target::{ArchiveFormat, Artifacts, Digest, Os, Platform},
 };
@@ -21,7 +22,7 @@ pub enum Format {
 impl Format {
     pub async fn format(
         self,
-        client: &reqwest::Client,
+        client: &Client,
         name: &mut Option<String>,
         platforms: &Artifacts,
         interactive: bool,
@@ -87,7 +88,7 @@ impl Format {
 // MARK: Dotslash
 
 async fn create_dotslash_file(
-    client: &reqwest::Client,
+    client: &Client,
     platforms: &Artifacts,
     prefer_sha256: bool,
     interactive: bool,
@@ -103,10 +104,7 @@ async fn create_dotslash_file(
     let mut platform_count = 0;
 
     for (platform, artifact) in platforms.iter() {
-        let url = artifact
-            .url
-            .parse()
-            .with_whatever_context(|_| format!("invalid url: {}", artifact.url))?;
+        let url = &artifact.url;
 
         tasks.push(async move {
             if let Some(hash) = artifact.digest

@@ -18,6 +18,11 @@ use crate::{
     target::{Artifact, ArtifactName, Artifacts, Digest, Http, Target},
 };
 
+type Client = hyper_util::client::legacy::Client<
+    hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+    String,
+>;
+
 // -------------------------------------------------------------------------------------------------
 // MARK: Args
 
@@ -142,15 +147,14 @@ async fn run(args: Args) -> Result<(), snafu::WhateverLocal> {
     let interactive = !args.no_interactive && std::io::stdin().is_terminal();
     let progress = interactive && !args.no_progress;
 
-    let client = &reqwest::Client::builder()
-        .user_agent(concat!(
-            "https://github.com/71/",
-            env!("CARGO_PKG_NAME"),
-            "@",
-            env!("CARGO_PKG_VERSION"),
-        ))
-        .build()
-        .whatever_context("failed to create HTTP client")?;
+    let https = hyper_rustls::HttpsConnectorBuilder::new()
+        .with_native_roots()
+        .whatever_context("no native root CA certificates found")?
+        .https_only()
+        .enable_http1()
+        .build();
+    let client = &hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+        .build(https);
 
     let platforms = expand_targets(client, args.targets).await?;
     let output = args
@@ -202,8 +206,127 @@ async fn run(args: Args) -> Result<(), snafu::WhateverLocal> {
 // -------------------------------------------------------------------------------------------------
 // MARK: Helpers
 
+/// Sends `request` to `url` via `client`, checking that its return status is not an error.
+async fn send(
+    client: &Client,
+    url: &str,
+    request: hyper::Request<String>,
+) -> Result<hyper::Response<hyper::body::Incoming>, snafu::WhateverLocal> {
+    let mut uri = url
+        .parse::<hyper::Uri>()
+        .with_whatever_context(|_| format!("invalid url {url}"))?;
+
+    for _ in 0..5 {
+        let mut request = request.clone();
+
+        *request.uri_mut() = uri;
+
+        request.headers_mut().append(
+            hyper::header::USER_AGENT,
+            hyper::header::HeaderValue::from_static(concat!(
+                "https://github.com/71/",
+                env!("CARGO_PKG_NAME"),
+                "@",
+                env!("CARGO_PKG_VERSION"),
+            )),
+        );
+
+        let method = request.method().clone();
+        let response = client
+            .request(request)
+            .await
+            .with_whatever_context(|_| format!("failed to {method} {url}"))?;
+
+        if response.status().is_redirection() {
+            uri = response
+                .headers()
+                .get(hyper::header::LOCATION)
+                .with_whatever_context(|| format!("{url} yielded invalid redirect"))?
+                .to_str()
+                .with_whatever_context(|_| format!("{url} yielded invalid redirect"))?
+                .parse()
+                .with_whatever_context(|_| format!("{url} yielded invalid redirect"))?;
+
+            continue;
+        }
+
+        snafu::ensure_whatever!(
+            response.status().is_success(),
+            "failed to {method} {url}: {}",
+            response.status(),
+        );
+
+        return Ok(response);
+    }
+
+    snafu::whatever!("too many redirects fetching {url}")
+}
+
+fn chunks(
+    incoming: hyper::body::Incoming,
+) -> impl futures_util::Stream<Item = Result<bytes::Bytes, hyper::Error>> {
+    #[repr(transparent)]
+    struct Stream(hyper::body::Incoming);
+
+    impl futures_util::Stream for Stream {
+        type Item = Result<bytes::Bytes, hyper::Error>;
+
+        fn poll_next(
+            self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Self::Item>> {
+            // SAFETY: `Stream` is a transparent wrapper around `.0`.
+            let inner = unsafe { std::pin::Pin::map_unchecked_mut(self, |x| &mut x.0) };
+
+            match hyper::body::Body::poll_frame(inner, cx) {
+                std::task::Poll::Ready(Some(Ok(frame))) => match frame.into_data() {
+                    Ok(data) => std::task::Poll::Ready(Some(Ok(data))),
+                    Err(_) => std::task::Poll::Pending,
+                },
+                std::task::Poll::Ready(Some(Err(err))) => std::task::Poll::Ready(Some(Err(err))),
+                std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+                std::task::Poll::Pending => std::task::Poll::Pending,
+            }
+        }
+    }
+
+    Stream(incoming)
+}
+
+fn content_length(response: &hyper::Response<hyper::body::Incoming>) -> Option<usize> {
+    if let Some(len_header) = response.headers().get(hyper::header::CONTENT_LENGTH)
+        && let Ok(len_str) = len_header.to_str()
+        && let Ok(len) = len_str.parse()
+        && len < 1_000_000_000
+    {
+        Some(len)
+    } else {
+        None
+    }
+}
+
+async fn read_all(
+    response: hyper::Response<hyper::body::Incoming>,
+) -> Result<Vec<u8>, hyper::Error> {
+    let mut bytes = Vec::new();
+
+    if let Some(len) = content_length(&response) {
+        bytes.reserve(len);
+    }
+
+    let mut stream = chunks(response.into_body());
+
+    while let Some(result) = stream.next().await {
+        let value = result?;
+
+        bytes.extend_from_slice(&value);
+    }
+
+    Ok(bytes)
+}
+
 async fn expand_targets(
-    client: &reqwest::Client,
+    client: &Client,
     mut targets: Vec<Target>,
 ) -> Result<Artifacts, snafu::WhateverLocal> {
     assert!(!targets.is_empty());
@@ -231,7 +354,7 @@ async fn expand_targets(
 }
 
 async fn expand_http(
-    client: &reqwest::Client,
+    client: &Client,
     Http {
         mut url,
         mut digest,

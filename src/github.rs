@@ -2,14 +2,14 @@ use futures_util::StreamExt;
 use snafu::ResultExt;
 
 use crate::{
-    Target,
+    Client, Target, read_all, send,
     target::{self, Artifact, ArtifactName, Artifacts, Digest, Platform},
 };
 
 /// Converts the [`Target::GitHubRelease`] in `targets` into [`Artifacts`]. Returns [`None`] if
 /// there is no `GitHubRelease` target, and [`Err`] if there is more than one.
 pub async fn to_artifacts(
-    client: &reqwest::Client,
+    client: &Client,
     targets: &mut [Target],
 ) -> Result<Option<Artifacts>, snafu::WhateverLocal> {
     // Extract the _only_ `GitHubRelease` in `targets`.
@@ -70,19 +70,16 @@ pub async fn to_artifacts(
         format!("https://api.{host}/repos/{org}/{repo}/releases/{release_tag}")
     };
 
-    let response = with_gh_token(
-        client
-            .get(&api_url)
-            .header("Accept", "application/vnd.github+json"),
-    )
-    .send()
-    .await
-    .with_whatever_context(|_| format!("failed to fetch release at {api_url}"))?
-    .error_for_status()
-    .with_whatever_context(|_| format!("failed to fetch release at {api_url}"))?;
+    let mut request = with_gh_token(Default::default())?;
 
-    let response_bytes = response
-        .bytes()
+    request.headers_mut().append(
+        hyper::header::ACCEPT,
+        hyper::header::HeaderValue::from_static("application/vnd.github+json"),
+    );
+
+    let response = send(client, &api_url, request).await?;
+
+    let response_bytes = read_all(response)
         .await
         .with_whatever_context(|_| format!("failed to read release at {api_url}"))?;
 
@@ -203,13 +200,24 @@ fn gh_artifact(
     }
 }
 
-pub fn with_gh_token(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
-        // https://docs.github.com/en/rest/authentication/authenticating-to-the-rest-api?apiVersion=2026-03-10#authenticating-in-a-github-actions-workflow-using-curl
-        request.header("Authorization", format!("Bearer {token}"))
-    } else {
-        request
+pub fn with_gh_token<T>(
+    mut request: hyper::Request<T>,
+) -> Result<hyper::Request<T>, snafu::WhateverLocal> {
+    // We intentionally do not add additional context (like the invalid value) below.
+    match std::env::var("GITHUB_TOKEN") {
+        Ok(token) => {
+            // https://docs.github.com/en/rest/authentication/authenticating-to-the-rest-api?apiVersion=2026-03-10#authenticating-in-a-github-actions-workflow-using-curl
+            request.headers_mut().append(
+                hyper::header::AUTHORIZATION,
+                hyper::header::HeaderValue::from_str(&format!("Bearer {token}"))
+                    .whatever_context("GITHUB_TOKEN is invalid")?,
+            );
+        }
+        Err(std::env::VarError::NotPresent) => {}
+        Err(std::env::VarError::NotUnicode(_)) => snafu::whatever!("GITHUB_TOKEN is invalid"),
     }
+
+    Ok(request)
 }
 
 #[derive(serde::Deserialize)]

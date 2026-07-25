@@ -167,8 +167,9 @@ jobs:
       - name: Generate Dotslash file
         run: |
           gh release download "${{ needs.check.outputs.version }}" \
-            --pattern create-dotslash-x86_64-unknown-linux-musl
-          chmod +x create-dotslash-x86_64-unknown-linux-musl
+            --pattern create-dotslash-x86_64-unknown-linux-musl \
+            --pattern dotslash
+          chmod +x create-dotslash-x86_64-unknown-linux-musl dotslash
 
           # We created a draft, so we can't access it via its tag. Instead, we must use the tag we
           # got when we created the release.
@@ -177,7 +178,7 @@ jobs:
             --output create-dotslash
 
           # Make sure that it works.
-          ./create-dotslash --help
+          ./dotslash ./create-dotslash --help
 
           # But from now on we want to access it via its tag, so we replace it in the generated
           # file.
