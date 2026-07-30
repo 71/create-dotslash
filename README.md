@@ -38,6 +38,29 @@ computing sizes, hashes, and paths.
 > Windows is supported and built as part of the CI, but not tested.
 > Contributions would be welcome.
 
+## Installation
+
+Copy `create-dotslash` from the
+[latest release](https://github.com/71/create-dotslash/releases), make it
+executable, then execute it with `dotslash`:
+
+```sh
+$ curl --fail --location --remote-name --show-error --silent \
+  https://github.com/71/create-dotslash/releases/download/v0.1.2/create-dotslash
+$ chmod +x ./create-dotslash
+$ ./create-dotslash --version
+```
+
+In case `dotslash` is not installed, we also provide in each release a pure
+shell script that downloads `dotslash` and executes it (using `--format sh`):
+
+```sh
+$ curl --fail --location --remote-name --show-error --silent \
+  https://github.com/71/create-dotslash/releases/download/v0.1.2/dotslash
+$ chmod +x ./dotslash
+$ ./dotslash --version
+```
+
 ## Usage
 
 ```sh
