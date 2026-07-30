@@ -327,6 +327,16 @@ impl tokio::io::AsyncRead for XzTarReader {
                 return Poll::Ready(Ok(()));
             }
 
+            if status == xz::stream::Status::MemNeeded {
+                // Two consecutive calls made no progress at all (no input consumed, no output
+                // produced) despite there being input and output space available (since we use a
+                // `u64::MAX` `memlimit`). We can't make progress.
+                return Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "xz decoder made no progress (corrupt or truncated stream)",
+                )));
+            }
+
             // No output was produced, the stream isn't done, and the caller still has room: we
             // must need more input, so loop back around to refill `input`.
         }
@@ -379,6 +389,8 @@ impl tokio::io::AsyncRead for ZstdTarReader {
             // `decode_from_to` needs at least a full frame header, and (once started) at least
             // one full block, to make progress; keep pulling more input until either happens or
             // the source is exhausted.
+            let mut source_pending = false;
+
             if !this.input_eof
                 && (this.input.len() < ZSTD_MAX_FRAME_HEADER_SIZE || this.input.len() < 128 * 1024)
             {
@@ -386,18 +398,22 @@ impl tokio::io::AsyncRead for ZstdTarReader {
 
                 match this.inner.poll_fill(cx, &mut scratch) {
                     Poll::Ready(Ok(0)) => this.input_eof = true,
-                    Poll::Ready(Ok(n)) => this.input.extend_from_slice(&scratch[..n]),
+                    Poll::Ready(Ok(n)) => {
+                        this.input.extend_from_slice(&scratch[..n]);
+                        continue;
+                    }
                     Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
                     Poll::Pending => {
                         // We may already have enough buffered to make progress (e.g. a small
                         // final block); only propagate `Pending` if we have nothing to try yet.
+                        // Otherwise fall through and try `decode_from_to` with what we have --
+                        // `poll_fill` has already registered `cx` for a wakeup.
                         if this.input.is_empty() {
                             return Poll::Pending;
                         }
+                        source_pending = true;
                     }
                 }
-
-                continue;
             }
 
             let (read, written) = this
@@ -412,10 +428,17 @@ impl tokio::io::AsyncRead for ZstdTarReader {
                 return Poll::Ready(Ok(()));
             }
 
-            if read == 0 && this.input_eof {
-                // No full block/header available and the source is exhausted: nothing more to
-                // decode.
-                return Poll::Ready(Ok(()));
+            if read == 0 {
+                if this.input_eof {
+                    // No full block/header available and the source is exhausted: nothing more
+                    // to decode.
+                    return Poll::Ready(Ok(()));
+                }
+                if source_pending {
+                    // `input` doesn't contain a full block yet, and the source has no more bytes
+                    // available right now; wait for `poll_fill`'s registered wakeup.
+                    return Poll::Pending;
+                }
             }
 
             // `read == 0` means `input` didn't contain a full block yet; loop back to pull more.
