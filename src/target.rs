@@ -1023,7 +1023,7 @@ fn parse_platform(
     let mut add_platform = |arch, os| {
         let platform = Platform::Known { arch, os };
 
-        if !platforms.contains(&platform) {
+        if !platforms[..*platform_count].contains(&platform) {
             platforms[*platform_count] = platform;
             *platform_count += 1;
         }
@@ -1042,15 +1042,15 @@ fn parse_platform(
         ("windows", Os::Windows),
     ];
 
-    if let Some((os, arch)) = s.split_once('-') {
+    if let Some((os_name, arch_name)) = s.split_once('-') {
         let os = OS_NAMES
             .iter()
-            .find_map(|&(name, os)| (name == s).then_some(os))
-            .ok_or_else(|| err(format!("unknown os {os:?}")))?;
+            .find_map(|&(name, os)| (name == os_name).then_some(os))
+            .ok_or_else(|| err(format!("unknown os {os_name:?}")))?;
         let arch = ARCH_NAMES
             .iter()
-            .find_map(|&(name, arch)| (name == s).then_some(arch))
-            .ok_or_else(|| err(format!("unknown arch {arch:?}")))?;
+            .find_map(|&(name, arch)| (name == arch_name).then_some(arch))
+            .ok_or_else(|| err(format!("unknown arch {arch_name:?}")))?;
 
         add_platform(arch, os);
     } else {
@@ -1084,14 +1084,8 @@ fn parse_platform(
     Ok(())
 }
 
-fn err(s: impl Into<String>) -> clap::Error {
-    let mut error = clap::Error::new(clap::error::ErrorKind::ValueValidation);
-
-    error.insert(
-        clap::error::ContextKind::InvalidValue,
-        clap::error::ContextValue::String(s.into()),
-    );
-    error
+fn err(s: impl std::fmt::Display) -> clap::Error {
+    clap::Error::raw(clap::error::ErrorKind::ValueValidation, s)
 }
 
 // -------------------------------------------------------------------------------------------------
