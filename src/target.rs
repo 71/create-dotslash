@@ -1,7 +1,7 @@
 // -------------------------------------------------------------------------------------------------
 // MARK: Target
 
-use std::str::FromStr;
+use std::{str::FromStr, unreachable};
 
 use snafu::{OptionExt, ResultExt};
 
@@ -33,6 +33,7 @@ pub struct Http {
     pub url: String,
     pub digest: Option<Digest>,
     pub size: Option<u64>,
+    pub platform: Option<Platform>,
     pub options: CommonOptions,
 }
 
@@ -85,10 +86,13 @@ pub struct ArtifactName {
     pub platform: Platform,
 }
 
-impl FromStr for ArtifactName {
-    type Err = ArtifactNameError;
-
-    fn from_str(mut file_name: &str) -> Result<Self, Self::Err> {
+impl ArtifactName {
+    /// Parses an artifact name from `file_name`. When `given_platform` is set it is trusted and
+    /// used as-is, warning if it disagrees with a platform parsed from the name.
+    pub fn parse(
+        mut file_name: &str,
+        given_platform: Option<Platform>,
+    ) -> Result<Self, ArtifactNameError> {
         let mut format = None;
 
         for &(ext, fmt) in ArchiveFormat::EXTENSIONS {
@@ -197,18 +201,37 @@ impl FromStr for ArtifactName {
             }
         }
 
-        let platform = if let Some(platform) = platform {
-            platform
+        let parsed = platform.or_else(|| {
+            Some(Platform::Known {
+                arch: arch?,
+                os: os?,
+            })
+        });
+
+        let platform = if let Some(given) = given_platform {
+            if let Some(parsed) = parsed
+                && parsed != given
+            {
+                eprintln!(
+                    "Warning: given platform {} does not match {} parsed from the file name.",
+                    given.name(),
+                    parsed.name(),
+                );
+            }
+
+            given
+        } else if let Some(parsed) = parsed {
+            parsed
         } else {
-            let arch = arch.context(MissingSnafu {
+            arch.context(MissingSnafu {
                 part: "architecture",
             })?;
-            let os = os.context(MissingSnafu { part: "os" })?;
+            os.context(MissingSnafu { part: "os" })?;
 
-            Platform::Known { arch, os }
+            unreachable!("`parsed` would be `Some`")
         };
 
-        let name = file_name[0..name_end.unwrap()]
+        let name = file_name[0..name_end.unwrap_or(file_name.len())]
             .trim_end_matches(['_', '-'])
             .to_owned();
 
@@ -218,6 +241,14 @@ impl FromStr for ArtifactName {
             platform,
             libc,
         })
+    }
+}
+
+impl FromStr for ArtifactName {
+    type Err = ArtifactNameError;
+
+    fn from_str(file_name: &str) -> Result<Self, Self::Err> {
+        Self::parse(file_name, None)
     }
 }
 
@@ -966,6 +997,7 @@ fn parse_http(url: &str, options: &str) -> Result<Http, clap::Error> {
     // Parse options.
     let mut digest = None;
     let mut size = None;
+    let mut platform = None;
 
     let options = CommonOptions::parse_with(options, |k, v| {
         match k {
@@ -1001,6 +1033,11 @@ fn parse_http(url: &str, options: &str) -> Result<Http, clap::Error> {
 
                 size = Some(v);
             }
+            "platform" => {
+                platform = Some(parse_single_platform(
+                    v.ok_or_else(|| err("platform must be given a value"))?,
+                )?);
+            }
             _ => return Err(err(format!("unknown option {k:?}"))),
         }
 
@@ -1012,6 +1049,7 @@ fn parse_http(url: &str, options: &str) -> Result<Http, clap::Error> {
         digest,
         options,
         size,
+        platform,
     })
 }
 
@@ -1028,19 +1066,6 @@ fn parse_platform(
             *platform_count += 1;
         }
     };
-
-    const ARCH_NAMES: &[(&str, Architecture)] = &[
-        ("aarch64", Architecture::Aarch64),
-        ("arm64", Architecture::Aarch64),
-        ("amd64", Architecture::X64),
-        ("x64", Architecture::X64),
-        ("x86_64", Architecture::X64),
-    ];
-    const OS_NAMES: &[(&str, Os)] = &[
-        ("linux", Os::Linux),
-        ("macos", Os::Macos),
-        ("windows", Os::Windows),
-    ];
 
     if let Some((os_name, arch_name)) = s.split_once('-') {
         let os = OS_NAMES
@@ -1082,6 +1107,43 @@ fn parse_platform(
     }
 
     Ok(())
+}
+
+const ARCH_NAMES: &[(&str, Architecture)] = &[
+    ("aarch64", Architecture::Aarch64),
+    ("arm64", Architecture::Aarch64),
+    ("amd64", Architecture::X64),
+    ("x64", Architecture::X64),
+    ("x86_64", Architecture::X64),
+];
+
+const OS_NAMES: &[(&str, Os)] = &[
+    ("linux", Os::Linux),
+    ("macos", Os::Macos),
+    ("windows", Os::Windows),
+];
+
+/// Parses a single concrete [`Platform`] from `s`, expecting `<os>-<arch>` (e.g. `linux-x86_64`)
+/// or `macos-universal`.
+fn parse_single_platform(s: &str) -> Result<Platform, clap::Error> {
+    if s == "macos-universal" {
+        return Ok(Platform::MacosUniversal);
+    }
+
+    let (os_name, arch_name) = s
+        .split_once('-')
+        .ok_or_else(|| err(format!("platform must be `<os>-<arch>`, got {s:?}")))?;
+
+    let os = OS_NAMES
+        .iter()
+        .find_map(|&(name, os)| (name == os_name).then_some(os))
+        .ok_or_else(|| err(format!("unknown os {os_name:?}")))?;
+    let arch = ARCH_NAMES
+        .iter()
+        .find_map(|&(name, arch)| (name == arch_name).then_some(arch))
+        .ok_or_else(|| err(format!("unknown arch {arch_name:?}")))?;
+
+    Ok(Platform::Known { arch, os })
 }
 
 fn err(s: impl std::fmt::Display) -> clap::Error {

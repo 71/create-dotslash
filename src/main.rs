@@ -81,10 +81,13 @@ struct Args {
     ///
     /// - `blake3=<hash>`: same as `digest`, but with an implicit `blake3:` prefix.
     ///
+    /// - `platform=<platform>`: the platform (see below) for the download, in case it cannot be
+    ///   determined automatically.
+    ///
     /// GitHub releases additionally support the following options:
     ///
-    /// - `platform=<platform>`: only download artifacts for the given platforms (architecture, OS,
-    ///   or both separated by a hyphen `-`). Can be repeated.
+    /// - `platform=<platform>`: only download artifacts for the given platforms (see below,
+    ///   although it is also valid to only pass an `<os>` or `<arch>`). Can be repeated.
     ///
     /// - `gnu`: prefer `gnu` over `musl` when both are available.
     ///
@@ -92,6 +95,9 @@ struct Args {
     ///
     /// As a special case, a file may also end with `.sha256`. The same file without the `.sha256`
     /// prefix will be downloaded instead and checked against the fetched `.sha256`.
+    ///
+    /// `<platform>` must be `<os>-<arch>`, with `<os>` one of `linux`, `macos`, or `windows`, and
+    /// `<arch>` one of `aarch64` or `x64`. It can also be `macos-universal`.
     #[arg(required(true), value_name = "TARGETS")]
     targets: Vec<Target>,
 }
@@ -359,6 +365,7 @@ async fn expand_http(
         mut url,
         mut digest,
         size,
+        platform,
         options: target::CommonOptions { path },
     }: Http,
 ) -> Result<Artifact, snafu::WhateverLocal> {
@@ -378,8 +385,7 @@ async fn expand_http(
         format,
         platform,
         libc: _,
-    } = file_name
-        .parse()
+    } = ArtifactName::parse(file_name, platform)
         .with_whatever_context(|_| format!("invalid file name: {}", file_name))?;
 
     Ok(Artifact {
