@@ -65,7 +65,7 @@ pub async fn fetch(
         if content_length.is_some() {
             bar.set_style(
                 indicatif::ProgressStyle::with_template(
-                    "[{elapsed}] {bar:40.cyan/blue} {bytes:>7}/{total_bytes:7} {msg}",
+                    "[{elapsed:>3}] {bar:40.cyan/blue} {bytes:>7}/{total_bytes:7} {msg}",
                 )
                 .unwrap()
                 .progress_chars("##-"),
