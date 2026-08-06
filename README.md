@@ -101,11 +101,14 @@ Arguments:
           - `blake3=<hash>`: same as `digest`, but with an implicit `blake3:`
           prefix.
           
+          - `platform=<platform>`: the platform (see below) for the download, in
+          case it cannot be determined automatically.
+          
           GitHub releases additionally support the following options:
           
           - `platform=<platform>`: only download artifacts for the given
-          platforms (architecture, OS, or both separated by a hyphen `-`). Can
-          be repeated.
+          platforms (see below, although it is also valid to only pass an `<os>`
+          or `<arch>`). Can be repeated.
           
           - `gnu`: prefer `gnu` over `musl` when both are available.
           
@@ -114,6 +117,10 @@ Arguments:
           As a special case, a file may also end with `.sha256`. The same file
           without the `.sha256` prefix will be downloaded instead and checked
           against the fetched `.sha256`.
+          
+          `<platform>` must be `<os>-<arch>`, with `<os>` one of `linux`,
+          `macos`, or `windows`, and `<arch>` one of `aarch64` or `x64`. It can
+          also be `macos-universal`.
 
 Options:
   -o, --output <FILE>
