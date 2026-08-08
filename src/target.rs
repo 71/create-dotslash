@@ -31,6 +31,7 @@ pub struct GitHubRelease {
 #[derive(Clone)]
 pub struct Http {
     pub url: String,
+    pub name: Option<String>,
     pub digest: Option<Digest>,
     pub size: Option<u64>,
     pub platform: Option<Platform>,
@@ -91,6 +92,7 @@ impl ArtifactName {
     /// used as-is, warning if it disagrees with a platform parsed from the name.
     pub fn parse(
         mut file_name: &str,
+        given_name: Option<String>,
         given_platform: Option<Platform>,
     ) -> Result<Self, ArtifactNameError> {
         let mut format = None;
@@ -191,7 +193,10 @@ impl ArtifactName {
 
                 // Extension.
                 _ => {
-                    snafu::ensure!(name_end.is_none(), UnknownSnafu { got: segment });
+                    snafu::ensure!(
+                        name_end.is_none() || given_name.is_some(),
+                        UnknownSnafu { got: segment },
+                    );
                     continue; // So we don't set `name_end` below.
                 }
             }
@@ -201,7 +206,7 @@ impl ArtifactName {
             }
         }
 
-        let parsed = platform.or_else(|| {
+        let parsed_platform = platform.or_else(|| {
             Some(Platform::Known {
                 arch: arch?,
                 os: os?,
@@ -209,7 +214,7 @@ impl ArtifactName {
         });
 
         let platform = if let Some(given) = given_platform {
-            if let Some(parsed) = parsed
+            if let Some(parsed) = parsed_platform
                 && parsed != given
             {
                 eprintln!(
@@ -220,7 +225,7 @@ impl ArtifactName {
             }
 
             given
-        } else if let Some(parsed) = parsed {
+        } else if let Some(parsed) = parsed_platform {
             parsed
         } else {
             arch.context(MissingSnafu {
@@ -231,9 +236,11 @@ impl ArtifactName {
             unreachable!("`parsed` would be `Some`")
         };
 
-        let name = file_name[0..name_end.unwrap_or(file_name.len())]
-            .trim_end_matches(['_', '-'])
-            .to_owned();
+        let name = given_name.unwrap_or_else(|| {
+            file_name[0..name_end.unwrap_or(file_name.len())]
+                .trim_end_matches(['_', '-'])
+                .to_owned()
+        });
 
         Ok(ArtifactName {
             name,
@@ -248,7 +255,7 @@ impl FromStr for ArtifactName {
     type Err = ArtifactNameError;
 
     fn from_str(file_name: &str) -> Result<Self, Self::Err> {
-        Self::parse(file_name, None)
+        Self::parse(file_name, None, None)
     }
 }
 
@@ -996,6 +1003,7 @@ fn parse_gh_release(
 fn parse_http(url: &str, options: &str) -> Result<Http, clap::Error> {
     // Parse options.
     let mut digest = None;
+    let mut name = None;
     let mut size = None;
     let mut platform = None;
 
@@ -1025,6 +1033,12 @@ fn parse_http(url: &str, options: &str) -> Result<Http, clap::Error> {
                         .map_err(|e| err(e.to_string()))?,
                 );
             }
+            "name" => {
+                name = Some(
+                    v.ok_or_else(|| err("name must be given a value"))?
+                        .to_owned(),
+                );
+            }
             "size" => {
                 let v = v
                     .ok_or_else(|| err("size must be given a value"))?
@@ -1047,6 +1061,7 @@ fn parse_http(url: &str, options: &str) -> Result<Http, clap::Error> {
     Ok(Http {
         url: url.to_owned(),
         digest,
+        name,
         options,
         size,
         platform,

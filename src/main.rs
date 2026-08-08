@@ -364,6 +364,7 @@ async fn expand_http(
     Http {
         mut url,
         mut digest,
+        name,
         size,
         platform,
         options: target::CommonOptions { path },
@@ -380,12 +381,13 @@ async fn expand_http(
         .with_whatever_context(|| format!("invalid url: {}", url))?;
 
     let file_name = &url[file_name_start + 1..];
+
     let ArtifactName {
         name,
         format,
         platform,
         libc: _,
-    } = ArtifactName::parse(file_name, platform)
+    } = ArtifactName::parse(file_name, name, platform)
         .with_whatever_context(|_| format!("invalid file name: {}", file_name))?;
 
     Ok(Artifact {

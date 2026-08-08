@@ -47,15 +47,12 @@ impl Archive {
         Archive { sender, task }
     }
 
-    /// Feeds the given `bytes` to the archive reader. Returns whether we are done with the given
-    /// archive, in which case we can stop reading the response. This can happen if all the entries
-    /// are at the beginning of the archive, in which case the rest of the archive can be skipped as
-    /// it only has data.
-    pub async fn update(&mut self, bytes: Bytes) -> bool {
+    /// Feeds the given `bytes` to the archive reader.
+    pub async fn update(&mut self, bytes: Bytes) {
         // If the reader task is done (dropped the `receiver`), then either it encountered an error
         // (which we'll report in `finish()`) or it reached the end of the entries in the archive.
         // Either way, we can stop reading now.
-        self.sender.send(bytes).await.is_err()
+        let _ = self.sender.send(bytes).await;
     }
 
     pub async fn finish(self, url: &str) -> Result<Vec<Entry>, snafu::WhateverLocal> {
@@ -113,7 +110,7 @@ where
 {
     let archive = async_tar::Archive::new(reader);
     let mut entries = archive
-        .entries()
+        .entries_raw()
         .whatever_context("failed to read tar archive")?;
     let mut results = Vec::new();
 

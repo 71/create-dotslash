@@ -109,10 +109,8 @@ pub async fn fetch(
             Hasher::Sha256(sha256) => sha256.update(&chunk),
         }
 
-        if let Some(archive) = &mut archive
-            && archive.update(chunk).await
-        {
-            break;
+        if let Some(archive) = &mut archive {
+            archive.update(chunk).await;
         }
     }
 
