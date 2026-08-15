@@ -812,7 +812,7 @@ impl Artifacts {
             (Os::Macos, Architecture::Aarch64, &self.macos_aarch64),
             (Os::Macos, Architecture::X64, &self.macos_x64),
             (Os::Windows, Architecture::Aarch64, &self.windows_aarch64),
-            (Os::Windows, Architecture::Aarch64, &self.windows_aarch64),
+            (Os::Windows, Architecture::X64, &self.windows_x64),
         ];
 
         platforms.into_iter().filter_map(|(os, arch, platform)| {
