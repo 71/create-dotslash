@@ -67,8 +67,8 @@ impl Archive {
 
 /// An entry in an archive.
 pub struct Entry {
-    executable: bool,
-    in_bin: bool,
+    pub executable: bool,
+    pub executable_naming: bool,
     pub path: String,
 }
 
@@ -79,7 +79,13 @@ impl Entry {
         }
 
         Entry {
-            in_bin: path.starts_with("bin/") || path.contains("/bin/") || path.ends_with(".exe"),
+            executable_naming: path.starts_with("bin/")
+                || path.contains("/bin/")
+                || path.ends_with(".exe")
+                || !path
+                    .rfind('/')
+                    .map_or(path.as_str(), |x| &path[x + 1..])
+                    .contains('.'),
             executable,
             path,
         }
@@ -100,8 +106,8 @@ fn finish_entries(vec: &mut Vec<Entry>) {
         return;
     }
 
-    // Otherwise, prefer entries in `bin/`.
-    vec.sort_by(|a, b| (!a.in_bin, &a.path).cmp(&(!b.in_bin, &b.path)));
+    // Otherwise, prefer entries named like executables.
+    vec.sort_by(|a, b| (!a.executable_naming, &a.path).cmp(&(!b.executable_naming, &b.path)));
 }
 
 async fn list_tar_entries<R>(reader: R) -> Result<Vec<Entry>, snafu::WhateverLocal>

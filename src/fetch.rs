@@ -159,6 +159,13 @@ fn pick_path(
     }
 
     let Some(picked_path) = picked_path_if_interactive else {
+        // Try to fallback to the only path that looks like a binary. Entries are already ordered
+        // when fetched, so we can compare only the first two ones.
+        if entries[0].executable_naming && !entries[1].executable_naming {
+            // Exactly one entry is named like an executable; take it.
+            return Ok(entries.swap_remove(0).path);
+        }
+
         snafu::whatever!(
             "cannot determine path of {url} among {}",
             entries.join(", "),
@@ -187,7 +194,9 @@ fn pick_path(
     // Determine if the path we already picked is available. We do this after stripping the
     // common prefix in case it has some platform-specific components.
     let path_index = if let Some(path) = &*picked_path.borrow()
-        && let Some(index) = display_paths.clone().position(|x| x == path)
+        && let Some(index) = display_paths
+            .clone()
+            .position(|x| remove_exe_suffix(x) == path)
     {
         // Reuse the path the user already picked.
         index
@@ -200,11 +209,16 @@ fn pick_path(
             .interact()
             .with_whatever_context(|_| format!("failed to prompt binary for {url}"))?;
 
-        *picked_path.borrow_mut() = Some(display_paths.nth(path_index).unwrap().to_owned());
+        *picked_path.borrow_mut() =
+            Some(remove_exe_suffix(display_paths.nth(path_index).unwrap()).to_owned());
 
         path_index
     };
 
     // Make sure to use the path in `entries`, rather than the one in `display_paths`.
     Ok(entries.swap_remove(path_index).path)
+}
+
+fn remove_exe_suffix(s: &str) -> &str {
+    s.strip_suffix(".exe").unwrap_or(s)
 }
