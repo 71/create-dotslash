@@ -305,7 +305,7 @@ fn to_shell(out: &mut Vec<u8>, name: &str, entries: &[Entry]) -> Result<(), snaf
 set -eu
 
 cache_dir="${{XDG_CACHE_HOME:-${{HOME:-}}/.cache/create-dotslash}}"
-test "$cache_dir" != "/.cache" || (echo '$XDG_CACHE_HOME or $HOME must be set' >&2 && exit 1)
+test "$cache_dir" != "/.cache/create-dotslash" || (echo '$XDG_CACHE_HOME or $HOME must be set' >&2 && exit 1)
 
 arch="$(uname -m)"
 case "$arch" in
@@ -379,6 +379,9 @@ case "$os-$arch" in
         .join(", ");
 
     // `curl -fsSL`: `--fail --silent --show-error --location`
+    //
+    // Note that `/bin/sh` only supports 1-9 in redirections ("9>" below), so we don't go for a
+    // higher number.
     write!(
         out,
         r#"	*)
