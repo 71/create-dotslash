@@ -88,6 +88,11 @@ pub async fn to_artifacts(
 
     let tag = release.as_deref().unwrap_or(&response_json.tag_name);
 
+    snafu::ensure_whatever!(
+        !response_json.assets.is_empty(),
+        "no asset found in {org}/{repo}@{tag}",
+    );
+
     // Keep all the assets that we can parse and that were requested by the user.
     let mut assets_by_platform = Platform::ALL.map(|platform| (platform, None));
 
@@ -122,10 +127,28 @@ pub async fn to_artifacts(
         }
     }
 
-    snafu::ensure_whatever!(
-        !assets_by_platform.is_empty(),
-        "no asset found for the requested platforms in {org}/{repo}@{tag}",
-    );
+    if assets_by_platform.iter().filter(|x| x.1.is_some()).count() == 0 {
+        let unknown_assets = response_json
+            .assets
+            .iter()
+            .map(|asset| asset.name.as_str())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>();
+
+        snafu::whatever!(
+            "no asset found{} in {org}/{repo}@{tag}; available {}: {}",
+            match platform_count {
+                0 => "",
+                1 => " for requested platform",
+                _ => " for requested platforms",
+            },
+            match unknown_assets.len() {
+                1 => "asset",
+                _ => "assets",
+            },
+            unknown_assets.join(", "),
+        );
+    }
 
     // For each asset we have, determine its digest (if possible).
     let mut artifacts = Artifacts::default();
