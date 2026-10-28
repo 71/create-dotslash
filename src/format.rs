@@ -197,33 +197,35 @@ struct Entry {
     format: Option<ArchiveFormat>,
     platform: Platform,
     dotslash_platform: &'static str,
-    dotslash_url_entry: DotslashUrlEntry,
+    dotslash_url_entry: DotslashUrlEntry<'static>,
 }
 
 // -------------------------------------------------------------------------------------------------
 // MARK: DotslashFile
 
 // https://dotslash-cli.com/docs/dotslash-file/
-#[derive(serde::Serialize)]
-struct DotslashFile {
-    name: String,
-    platforms: BTreeMap<&'static str, DotslashUrlEntry>,
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct DotslashFile<'a> {
+    pub name: String,
+    #[serde(borrow)]
+    pub platforms: BTreeMap<&'a str, DotslashUrlEntry<'a>>,
 }
 
-#[derive(serde::Serialize, Debug, Hash)]
-struct DotslashUrlEntry {
-    size: u64,
-    hash: &'static str,
-    digest: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    format: Option<&'static str>,
-    path: String,
-    providers: Vec<DotslashProvider>,
+#[derive(serde::Deserialize, serde::Serialize, Debug, Hash)]
+pub struct DotslashUrlEntry<'a> {
+    pub size: u64,
+    #[serde(borrow)]
+    pub hash: &'a str,
+    pub digest: String,
+    #[serde(borrow, skip_serializing_if = "Option::is_none")]
+    pub format: Option<&'a str>,
+    pub path: String,
+    pub providers: Vec<DotslashProvider>,
 }
 
-#[derive(serde::Serialize, Debug, Hash)]
+#[derive(serde::Deserialize, serde::Serialize, Debug, Hash)]
 #[serde(tag = "type")]
-enum DotslashProvider {
+pub enum DotslashProvider {
     #[serde(rename = "github-release")]
     GitHub {
         repo: String,

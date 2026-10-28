@@ -9,6 +9,7 @@ use snafu::{OptionExt, ResultExt};
 
 mod archive;
 mod fetch;
+mod file;
 mod format;
 mod github;
 mod target;
@@ -41,6 +42,10 @@ struct Args {
     #[arg(long, default_value = "dotslash")]
     format: Format,
 
+    /// Updates the given Dotslash file in place.
+    #[arg(short, long, conflicts_with = "output")]
+    in_place: bool,
+
     /// The name to give to the program.
     #[arg(long, value_name = "NAME", value_hint = clap::ValueHint::Other)]
     name: Option<String>,
@@ -68,11 +73,18 @@ struct Args {
     /// - `https://github.com/org/repo`: download the latest stable `release` from `org/repo`. Also
     ///   available as `github:org/repo` (or `github:example.com/org/repo` for GHE).
     ///
+    /// - `path/to/dotslash/file`: use an existing Dotslash file as template.
+    ///
     /// Options can be specified after each URI using a hash `#`, and separated by a comma:
     ///
     /// - `path=<path>`: the path of the binary in its archive.
     ///
-    /// HTTP releases additional support the following options:
+    /// Dotslash files additionally support the following options:
+    ///
+    /// - `update=[version]`: updates the components; the version will be prompted or automatically
+    ///   determined if not given.
+    ///
+    /// HTTP releases additionally support the following options:
     ///
     /// - `digest=<digest>`: the digest of the archive or binary; specifying both a `path` and a
     ///   `digest` allows the download of the archive to be skipped.
@@ -118,7 +130,7 @@ fn main() -> snafu::Report<snafu::WhateverLocal> {
     })
 }
 
-async fn run(args: Args) -> Result<(), snafu::WhateverLocal> {
+async fn run(mut args: Args) -> Result<(), snafu::WhateverLocal> {
     let mut name = args.name;
     let mut out_is_dir = false;
 
@@ -162,7 +174,14 @@ async fn run(args: Args) -> Result<(), snafu::WhateverLocal> {
     let client = &hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
         .build(https);
 
-    let platforms = expand_targets(client, args.targets).await?;
+    let platforms = expand_targets(
+        client,
+        args.targets,
+        args.in_place,
+        interactive,
+        &mut args.output,
+    )
+    .await?;
     let output = args
         .format
         .format(client, &mut name, &platforms, interactive, progress)
@@ -174,6 +193,7 @@ async fn run(args: Args) -> Result<(), snafu::WhateverLocal> {
         }
 
         let overwrite = args.force
+            || args.in_place
             || (interactive
                 && out.exists()
                 && dialoguer::Confirm::new()
@@ -265,7 +285,7 @@ async fn send(
         return Ok(response);
     }
 
-    snafu::whatever!("too many redirects fetching {url}")
+    snafu::whatever!("too many redirects fetching {url}");
 }
 
 fn chunks(
@@ -333,12 +353,42 @@ async fn read_all(
 
 async fn expand_targets(
     client: &Client,
-    mut targets: Vec<Target>,
+    targets: Vec<Target>,
+    in_place: bool,
+    interactive: bool,
+    output: &mut Option<PathBuf>,
 ) -> Result<Artifacts, snafu::WhateverLocal> {
     assert!(!targets.is_empty());
 
-    if let Some(artifacts) = github::to_artifacts(client, &mut targets).await? {
-        return Ok(artifacts);
+    for target in &targets {
+        match target {
+            Target::DotslashFile(_) => {
+                let Ok([Target::DotslashFile(dotslash_file)]) =
+                    TryInto::<[Target; 1]>::try_into(targets)
+                else {
+                    snafu::whatever!("a dotslash file may not be specified with any other target");
+                };
+                let result = file::to_artifacts(client, &dotslash_file, interactive).await?;
+
+                if in_place {
+                    assert!(output.is_none(), "enforced by clap");
+
+                    *output = Some(dotslash_file.path);
+                }
+
+                return Ok(result);
+            }
+            Target::GitHubRelease(_) => {
+                let Ok([Target::GitHubRelease(github_release)]) =
+                    TryInto::<[Target; 1]>::try_into(targets)
+                else {
+                    snafu::whatever!("a GitHub release may not be specified with any other target");
+                };
+
+                return github::to_artifacts(client, github_release).await;
+            }
+            Target::Http(_) => {}
+        }
     }
 
     let mut artifacts = Artifacts::default();
@@ -346,7 +396,7 @@ async fn expand_targets(
 
     for target in targets {
         let Target::Http(http) = target else {
-            unreachable!("ensured by `github::expand_release()`")
+            unreachable!("enforced in the loop above")
         };
 
         futures.push(expand_http(client, http));
@@ -410,10 +460,27 @@ fn readme_up_to_date() {
     let actual_help = &readme
         [readme.find(help_start).unwrap() + help_start.len()..readme.rfind(help_end).unwrap()];
 
-    let expected_help = <Args as clap::CommandFactory>::command()
+    let mut expected_help = <Args as clap::CommandFactory>::command()
         .term_width(80)
         .render_long_help()
         .to_string();
+
+    // Remove trailing whitespace.
+    let mut line_start = 0;
+
+    while let Some(line_len) = expected_help[line_start..].find('\n') {
+        let line = &expected_help[line_start..line_start + line_len];
+        let trimmed = line.trim_ascii_end();
+
+        if line.len() != trimmed.len() {
+            let new_line_len = trimmed.len();
+
+            expected_help.replace_range(line_start + new_line_len..line_start + line_len, "");
+            line_start += new_line_len + 1;
+        } else {
+            line_start += line_len + 1;
+        }
+    }
 
     if actual_help == expected_help {
         return;

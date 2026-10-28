@@ -1,7 +1,7 @@
 // -------------------------------------------------------------------------------------------------
 // MARK: Target
 
-use std::{str::FromStr, unreachable};
+use std::{path::PathBuf, str::FromStr, unreachable};
 
 use snafu::{OptionExt, ResultExt};
 
@@ -10,8 +10,16 @@ use crate::{Client, github::with_gh_token, read_all, send};
 /// A file to download specified by the user.
 #[derive(Clone)]
 pub enum Target {
+    DotslashFile(DotslashFile),
     GitHubRelease(GitHubRelease),
     Http(Http),
+}
+
+/// [`Target`]: an existing Dotslash file.
+#[derive(Clone)]
+pub struct DotslashFile {
+    pub path: PathBuf,
+    pub update: Option<String>,
 }
 
 /// [`Target`]: download a release from GitHub.
@@ -27,7 +35,7 @@ pub struct GitHubRelease {
     pub options: CommonOptions,
 }
 
-/// [`Http`]: download a file from an URL.
+/// [`Target`]: download a file from an URL.
 #[derive(Clone)]
 pub struct Http {
     pub url: String,
@@ -97,12 +105,9 @@ impl ArtifactName {
     ) -> Result<Self, ArtifactNameError> {
         let mut format = None;
 
-        for &(ext, fmt) in ArchiveFormat::EXTENSIONS {
-            if let Some(stripped) = file_name.strip_suffix(ext) {
-                format = Some(fmt);
-                file_name = stripped;
-                break;
-            }
+        if let Some((name, f)) = ArchiveFormat::from_file_name(file_name) {
+            file_name = name;
+            format = Some(f);
         }
 
         if let Some(stripped) = file_name.strip_suffix(".exe") {
@@ -718,7 +723,7 @@ impl Digest {
         } else if algo == "blake3" {
             |bytes| Digest::Blake3(blake3::Hash::from_bytes(bytes))
         } else {
-            snafu::whatever!("unknown digest algorithm {algo}")
+            snafu::whatever!("unknown digest algorithm {algo}");
         };
 
         let bytes = Self::parse_digest_bytes(data.as_bytes())
@@ -728,7 +733,7 @@ impl Digest {
     }
 
     /// Parses the digest data from either hex or base64.
-    fn parse_digest_bytes(data: &[u8]) -> Option<[u8; 32]> {
+    pub fn parse_digest_bytes(data: &[u8]) -> Option<[u8; 32]> {
         match data.len() {
             64 => Some(*blake3::Hash::from_hex(data).ok()?.as_bytes()),
 
@@ -859,7 +864,7 @@ impl CommonOptions {
         for entry in s.split(',') {
             let (k, v) = entry
                 .split_once('=')
-                .map_or((s, None), |(k, v)| (k, Some(v)));
+                .map_or((entry, None), |(k, v)| (k, Some(v)));
 
             match k {
                 "path" => {
@@ -943,7 +948,26 @@ impl FromStr for Target {
 
             parse_gh_release(host, org, repo, release, after_hash).map(Target::GitHubRelease)
         } else {
-            Err(clap::Error::new(clap::error::ErrorKind::ValueValidation))
+            // Parse file path.
+            let mut update = None;
+
+            if !after_hash.is_empty() {
+                for entry in after_hash.split(',') {
+                    let (k, v) = entry
+                        .split_once('=')
+                        .map_or((entry, None), |(k, v)| (k, Some(v)));
+
+                    match k {
+                        "update" => update = Some(v.unwrap_or_default().to_owned()),
+                        _ => return Err(err(format!("unknown option {k:?}"))),
+                    }
+                }
+            }
+
+            Ok(Target::DotslashFile(DotslashFile {
+                path: before_hash.to_owned().into(),
+                update,
+            }))
         }
     }
 }
@@ -1204,6 +1228,32 @@ impl ArchiveFormat {
         (".zst", ArchiveFormat::Zst),
     ];
 
+    pub fn from_file_name(name: &str) -> Option<(&str, ArchiveFormat)> {
+        for &(ext, fmt) in ArchiveFormat::EXTENSIONS {
+            if let Some(stripped) = name.strip_suffix(ext) {
+                return Some((stripped, fmt));
+            }
+        }
+
+        None
+    }
+
+    pub fn from_dotslash(name: &str) -> Option<ArchiveFormat> {
+        match name {
+            "tar" => Some(ArchiveFormat::Tar),
+            "tar.gz" => Some(ArchiveFormat::TarGz),
+            "tar.xz" => Some(ArchiveFormat::TarXz),
+            "tar.zst" => Some(ArchiveFormat::TarZst),
+            "tar.bz2" => Some(ArchiveFormat::TarBz2),
+            "zip" => Some(ArchiveFormat::Zip),
+            "gz" => Some(ArchiveFormat::Gz),
+            "xz" => Some(ArchiveFormat::Xz),
+            "zst" => Some(ArchiveFormat::Zst),
+            "bz2" => Some(ArchiveFormat::Bz2),
+            _ => None,
+        }
+    }
+
     pub const fn as_str(&self) -> &'static str {
         match self {
             ArchiveFormat::Tar => "tar",
@@ -1287,6 +1337,37 @@ impl Platform {
                 (Os::Windows, Architecture::X64) => "windows-x86_64",
             },
             Platform::MacosUniversal => "macos-universal",
+        }
+    }
+
+    pub fn from_dotslash(s: &str) -> Option<Platform> {
+        match s {
+            "linux-aarch64" => Some(Platform::Known {
+                arch: Architecture::Aarch64,
+                os: Os::Linux,
+            }),
+            "linux-x86_64" => Some(Platform::Known {
+                arch: Architecture::X64,
+                os: Os::Linux,
+            }),
+            "macos-aarch64" => Some(Platform::Known {
+                arch: Architecture::Aarch64,
+                os: Os::Macos,
+            }),
+            "macos-universal" => Some(Platform::MacosUniversal),
+            "macos-x86_64" => Some(Platform::Known {
+                arch: Architecture::X64,
+                os: Os::Macos,
+            }),
+            "windows-aarch64" => Some(Platform::Known {
+                arch: Architecture::Aarch64,
+                os: Os::Windows,
+            }),
+            "windows-x86_64" => Some(Platform::Known {
+                arch: Architecture::X64,
+                os: Os::Windows,
+            }),
+            _ => None,
         }
     }
 }

@@ -2,7 +2,7 @@ use futures_util::StreamExt;
 use snafu::ResultExt;
 
 use crate::{
-    Client, Target, read_all, send,
+    Client, read_all, send,
     target::{self, Artifact, ArtifactName, Artifacts, Digest, Platform},
 };
 
@@ -10,28 +10,7 @@ use crate::{
 /// there is no `GitHubRelease` target, and [`Err`] if there is more than one.
 pub async fn to_artifacts(
     client: &Client,
-    targets: &mut [Target],
-) -> Result<Option<Artifacts>, snafu::WhateverLocal> {
-    // Extract the _only_ `GitHubRelease` in `targets`.
-    let gh_release_targets = targets
-        .iter()
-        .filter(|t| matches!(t, Target::GitHubRelease(_)))
-        .count();
-
-    match gh_release_targets {
-        0 => return Ok(None),
-        1 => snafu::ensure_whatever!(
-            targets.len() == 1,
-            "no target may be specified alongside a github release",
-        ),
-        _ => snafu::whatever!("only one github release may be specified"),
-    }
-
-    let Some(Target::GitHubRelease(target)) = targets.first_mut() else {
-        unreachable!()
-    };
-
-    let target::GitHubRelease {
+    target::GitHubRelease {
         host,
         org,
         repo,
@@ -40,20 +19,8 @@ pub async fn to_artifacts(
         platform_count,
         prefer_gnu,
         options: target::CommonOptions { path },
-    } = std::mem::replace(
-        target,
-        target::GitHubRelease {
-            host: Default::default(),
-            org: Default::default(),
-            repo: Default::default(),
-            release: Default::default(),
-            platforms: Platform::ALL,
-            platform_count: 0,
-            prefer_gnu: false,
-            options: Default::default(),
-        },
-    );
-
+    }: target::GitHubRelease,
+) -> Result<Artifacts, snafu::WhateverLocal> {
     let platforms = &platforms[..platform_count];
 
     // Fetch the release from the GitHub API.
@@ -198,7 +165,42 @@ pub async fn to_artifacts(
         artifacts.set(result?);
     }
 
-    Ok(Some(artifacts))
+    Ok(artifacts)
+}
+
+pub struct Release {
+    pub tag_name: String,
+}
+
+pub async fn latest_releases(
+    client: &Client,
+    host: &str,
+    org: &str,
+    repo: &str,
+) -> Result<Vec<Release>, snafu::WhateverLocal> {
+    let api_url = format!("https://api.{host}/repos/{org}/{repo}/releases");
+    let mut request = with_gh_token(Default::default())?;
+
+    request.headers_mut().append(
+        hyper::header::ACCEPT,
+        hyper::header::HeaderValue::from_static("application/vnd.github+json"),
+    );
+
+    let response = send(client, &api_url, request).await?;
+
+    let response_bytes = read_all(response)
+        .await
+        .with_whatever_context(|_| format!("failed to read releases at {api_url}"))?;
+
+    let response_json: Vec<GitHubReleaseResponse> = serde_json::from_slice(&response_bytes)
+        .with_whatever_context(|_| format!("failed to parse releases at {api_url}"))?;
+
+    Ok(response_json
+        .into_iter()
+        .map(|release| Release {
+            tag_name: release.tag_name,
+        })
+        .collect())
 }
 
 fn gh_artifact(

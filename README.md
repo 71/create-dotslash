@@ -70,54 +70,61 @@ Usage: create-dotslash [OPTIONS] <TARGETS>...
 Arguments:
   <TARGETS>...
           The targets to download and parse for inclusion in the Dotslash file.
-          
+
           The following formats are supported:
-          
+
           - `https://some.url/path/to/file`: download the file at the given URL,
           using its extension to determine its type.
-          
+
           - `https://github.com/org/repo/releases/release`: download the given
           `release` from `org/repo`. Also available as `github:org/repo/release`
           (or `github:example.com/org/repo/release` for GHE).
-          
+
           - `https://github.com/org/repo`: download the latest stable `release`
           from `org/repo`. Also available as `github:org/repo` (or
           `github:example.com/org/repo` for GHE).
-          
+
+          - `path/to/dotslash/file`: use an existing Dotslash file as template.
+
           Options can be specified after each URI using a hash `#`, and
           separated by a comma:
-          
+
           - `path=<path>`: the path of the binary in its archive.
-          
-          HTTP releases additional support the following options:
-          
+
+          Dotslash files additionally support the following options:
+
+          - `update=[version]`: updates the components; the version will be
+          prompted or automatically determined if not given.
+
+          HTTP releases additionally support the following options:
+
           - `digest=<digest>`: the digest of the archive or binary; specifying
           both a `path` and a `digest` allows the download of the archive to be
           skipped.
-          
+
           - `sha256=<hash>`: same as `digest`, but with an implicit `sha256:`
           prefix.
-          
+
           - `blake3=<hash>`: same as `digest`, but with an implicit `blake3:`
           prefix.
-          
+
           - `platform=<platform>`: the platform (see below) for the download, in
           case it cannot be determined automatically.
-          
+
           GitHub releases additionally support the following options:
-          
+
           - `platform=<platform>`: only download artifacts for the given
           platforms (see below, although it is also valid to only pass an `<os>`
           or `<arch>`). Can be repeated.
-          
+
           - `gnu`: prefer `gnu` over `musl` when both are available.
-          
+
           - `musl`: prefer `musl` over `gnu` when both are available (default).
-          
+
           As a special case, a file may also end with `.sha256`. The same file
           without the `.sha256` prefix will be downloaded instead and checked
           against the fetched `.sha256`.
-          
+
           `<platform>` must be `<os>-<arch>`, with `<os>` one of `linux`,
           `macos`, or `windows`, and `<arch>` one of `aarch64` or `x64`. It can
           also be `macos-universal`.
@@ -138,8 +145,11 @@ Options:
             `tee`, `mkdir`, `chmod`, `flock`, and additional programs for
             computing digests (`b3sum` or `sha256sum`) and for extraction (or
             `mv` if no extraction is needed)
-          
+
           [default: dotslash]
+
+  -i, --in-place
+          Updates the given Dotslash file in place
 
       --name <NAME>
           The name to give to the program
